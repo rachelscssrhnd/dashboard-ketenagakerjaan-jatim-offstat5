@@ -51,7 +51,9 @@ html, body, .main, [data-testid="stAppViewContainer"],
     align-items: center;
     gap: 18px;
     box-shadow: 0 4px 20px rgba(0,61,122,.25);
-    position: relative;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 9999 !important;
 }
 .dash-header-logo {
     width: 52px; height: 52px;
@@ -243,6 +245,20 @@ div[data-testid="column"] > div { height: 100%; }
     color: #003d7a !important;
     text-transform: uppercase !important;
     letter-spacing: .4px !important;
+}
+/* Streamlit main container - allow overflow for sticky */
+[data-testid="stAppViewContainer"] {
+    overflow-y: auto !important;
+}
+/* Sticky Tab Bar */
+[role="tablist"] {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 9998 !important;
+    background: white !important;
+    padding: 10px 0 !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,.1) !important;
+    margin: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -696,6 +712,7 @@ with tab1:
             pct_s = 100 - pct_p
             st.markdown(f"""<div class="analisis-card"><h5>Analisis</h5>
             <ul>
+            <li>Data tahun 2024 tidak tersedia di BPS.</li>
             <li>Tahun {max(ay)}: <span class="hi">{pct_p:.1f}%</span> pekerja penuh waktu.</li>
             <li><span class="warn">{pct_s:.1f}% setengah pengangguran</span> — bekerja &lt;35 jam/minggu, berdampak pada pendapatan rendah.</li>
             <li>Butuh kebijakan <span class="hi">penciptaan kerja formal</span> dengan jam kerja penuh.</li>
@@ -769,6 +786,409 @@ with tab1:
         </ul></div>""", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    #  PATCH: Section F — Heatmap Pemetaan Spasial Jawa Timur
+    #  Sisipkan di dalam `with tab1:`, setelah penutup Section E
+    #  (tepat sebelum komentar  # ══ TAB 2: PASAR & KEBUTUHAN KERJA ══)
+    #
+    #  TIDAK MEMERLUKAN dependensi tambahan — semua sudah ada di requirements
+    #  (plotly, pandas, numpy, requests sudah include di Streamlit default).
+    #
+    #  Strategi peta:
+    #   • Jika GeoJSON berhasil dimuat → px.choropleth (peta isi penuh)
+    #   • Jika tidak ada koneksi → px.scatter_geo bubble map (tetap informatif)
+    #
+    #  GeoJSON dicoba dari dua sumber alternatif yang ringan (file <500 KB).
+    #  Centroid 38 kab/kota Jawa Timur di-embed langsung (fallback 0 dependency).
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    import requests as _req, json as _json, re as _re
+
+    # ── Centroid lookup (fallback bubble map & label matching) ──────────────────
+    _JATIM_CENTROIDS = {
+        "Kab. Pacitan":     (-8.175, 111.110), "Kab. Ponorogo":    (-7.870, 111.463),
+        "Kab. Trenggalek":  (-8.054, 111.712), "Kab. Tulungagung": (-8.067, 111.903),
+        "Kab. Blitar":      (-8.100, 112.168), "Kab. Kediri":      (-7.820, 112.018),
+        "Kab. Malang":      (-8.160, 112.630), "Kab. Lumajang":    (-8.130, 113.222),
+        "Kab. Jember":      (-8.172, 113.703), "Kab. Banyuwangi":  (-8.220, 114.370),
+        "Kab. Bondowoso":   (-7.910, 113.820), "Kab. Situbondo":   (-7.710, 114.010),
+        "Kab. Probolinggo": (-7.750, 113.220), "Kab. Pasuruan":    (-7.645, 112.910),
+        "Kab. Sidoarjo":    (-7.450, 112.718), "Kab. Mojokerto":   (-7.472, 112.433),
+        "Kab. Jombang":     (-7.550, 112.232), "Kab. Nganjuk":     (-7.605, 111.905),
+        "Kab. Madiun":      (-7.630, 111.542), "Kab. Magetan":     (-7.652, 111.329),
+        "Kab. Ngawi":       (-7.404, 111.443), "Kab. Bojonegoro":  (-7.152, 111.881),
+        "Kab. Tuban":       (-6.902, 111.894), "Kab. Lamongan":    (-7.118, 112.413),
+        "Kab. Gresik":      (-7.156, 112.654), "Kab. Bangkalan":   (-7.038, 112.733),
+        "Kab. Sampang":     (-7.187, 113.248), "Kab. Pamekasan":   (-7.157, 113.474),
+        "Kab. Sumenep":     (-6.988, 113.869), "Kota Kediri":      (-7.817, 112.011),
+        "Kota Blitar":      (-8.095, 112.161), "Kota Malang":      (-7.983, 112.621),
+        "Kota Probolinggo": (-7.752, 113.215), "Kota Pasuruan":    (-7.643, 112.899),
+        "Kota Mojokerto":   (-7.469, 112.436), "Kota Madiun":      (-7.629, 111.527),
+        "Kota Surabaya":    (-7.250, 112.750), "Kota Batu":        (-7.870, 112.524),
+    }
+
+    def _norm(x):
+        if pd.isna(x):
+            return ""
+        x = str(x).lower().strip()
+
+        # hapus prefix
+        x = x.replace("kabupaten ", "")
+        x = x.replace("kab. ", "")
+        x = x.replace("kota ", "")
+
+        # bersihin spasi
+        x = " ".join(x.split())
+
+        return x
+
+    def _fuzzy_match(query: str, choices) -> str | None:
+        q = _norm(query).lower()
+        for c in choices:
+            if _norm(c).lower() == q: return c
+        for c in choices:
+            cn = _norm(c).lower()
+            if q in cn or cn in q: return c
+        q_tok = set(q.split())
+        best = max(choices, key=lambda c: len(q_tok & set(_norm(c).lower().split())), default=None)
+        if best and q_tok & set(_norm(best).lower().split()):
+            return best
+        return None
+
+    # ── GeoJSON loader (tries two CDN routes, falls back gracefully) ────────────
+    _GJ_URLS = [
+        "https://raw.githubusercontent.com/ans-4175/peta-indonesia-geojson/master/jawa-timur.geojson",
+        "https://raw.githubusercontent.com/superpikar/indonesia-geojson/master/jawa-timur.geojson",
+    ]
+    _GJ_CACHE_PATH = os.path.join(BASE, "_jatim_geo_cache.json")
+
+    @st.cache_data(ttl=86400, show_spinner=False)
+    def _load_geojson():
+        if os.path.exists(_GJ_CACHE_PATH):
+            try:
+                with open(_GJ_CACHE_PATH) as f: return _json.load(f)
+            except Exception: pass
+        for url in _GJ_URLS:
+            try:
+                r = _req.get(url, timeout=12,
+                            headers={"User-Agent": "Mozilla/5.0 (compatible; dashboard/1.0)"})
+                r.raise_for_status()
+                gj = r.json()
+                if gj.get("features"):
+                    with open(_GJ_CACHE_PATH, "w") as f: _json.dump(gj, f)
+                    return gj
+            except Exception:
+                continue
+        return None
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    #  SECTION F — Heatmap Pemetaan Spasial Jawa Timur
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    st.markdown(
+        '<div class="sec-head">F · Pemetaan Spasial Angka TPT Jawa Timur</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.container():
+        st.markdown('<div class="chart-card">', unsafe_allow_html=True)
+
+        # ── Filter row ──────────────────────────────────────────────────────────
+        ff1, ff2, ff3 = st.columns([1, 1, 2])
+        with ff1:
+            yr_map = st.selectbox(
+                "Tahun", ["2025", "2024", "2023", "2022", "2021"], key="f_map_yr"
+            )
+        with ff2:
+            ind_map = st.selectbox(
+                "Indikator",
+                ["TPT (%)"],
+                key="f_map_ind",
+            )
+        with ff3:
+            cs_opt = st.selectbox(
+                "Skema Warna",
+                ["RdYlGn_r — Merah=Kritis", "Blues", "YlOrRd", "Viridis"],
+                key="f_map_cs",
+            )
+
+        st.markdown(
+            f'<div class="chart-card-title" style="padding:0 18px 8px;">'
+            f'Peta Sebaran <b>{ind_map}</b> per Kab/Kota — {yr_map}</div>',
+            unsafe_allow_html=True,
+        )
+
+        # ── Build nilai per kab/kota ────────────────────────────────────────────
+        kab_m = df_tpt[df_tpt["wilayah"].str.strip() != "Jawa Timur"].copy()
+        kab_m["wilayah_norm"] = kab_m["wilayah"].apply(_norm)
+
+        if ind_map == "TPT (%)":
+            kab_m["nilai"] = pd.to_numeric(kab_m[yr_map], errors="coerce")
+            unit, fmt = "%", ".2f"
+
+        elif ind_map in ("Pencari Kerja (Orang)", "Lowongan Kerja (Orang)"):
+            field = "pencari" if "Pencari" in ind_map else "lowongan"
+            col_lk = f"{field}_{yr_map}"
+            tmp = kab_lk[["wilayah", col_lk]].copy()
+            tmp["wilayah_norm"] = tmp["wilayah"].apply(_norm)
+            kab_m = kab_m.merge(
+                tmp[["wilayah_norm", col_lk]], on="wilayah_norm", how="left"
+            )
+            kab_m["nilai"] = pd.to_numeric(kab_m[col_lk], errors="coerce")
+            unit, fmt = "orang", ",.0f"
+
+        else:  # Rasio Lowongan/Pencari
+            tmp2 = kab_lk[["wilayah", f"pencari_{yr_map}", f"lowongan_{yr_map}"]].copy()
+            tmp2["wilayah_norm"] = tmp2["wilayah"].apply(_norm)
+            kab_m = kab_m.merge(tmp2[["wilayah_norm", f"pencari_{yr_map}", f"lowongan_{yr_map}"]],
+                                on="wilayah_norm", how="left")
+            pen  = kab_m[f"pencari_{yr_map}"].replace(0, np.nan)
+            kab_m["nilai"] = (kab_m[f"lowongan_{yr_map}"] / pen).round(2)
+            unit, fmt = "x", ".2f"
+
+        kab_m["nilai"] = pd.to_numeric(kab_m["nilai"], errors="coerce")
+        v_clean = kab_m["nilai"].dropna()
+
+        # ── Koordinat ──────────────────────────────────────────────────────────
+        def _coord(wil):
+            k = _fuzzy_match(wil, list(_JATIM_CENTROIDS.keys()))
+            return _JATIM_CENTROIDS.get(k, (None, None))
+
+        kab_m["lat"] = kab_m["wilayah"].apply(lambda w: _coord(w)[0])
+        kab_m["lon"] = kab_m["wilayah"].apply(lambda w: _coord(w)[1])
+
+        # ── Color scale mapping ─────────────────────────────────────────────────
+        _CS = {
+            "RdYlGn_r — Merah=Kritis": "RdYlGn_r",
+            "Blues":  "Blues",
+            "YlOrRd": "YlOrRd",
+            "Viridis": "Viridis",
+        }
+        chosen_cs = _CS.get(cs_opt, "RdYlGn_r")
+
+        # ── Attempt choropleth, fallback to bubble map ──────────────────────────
+        gj = _load_geojson()
+        col_map, col_ana = st.columns([3, 1])
+
+        with col_map:
+            if gj and gj.get("features"):
+                # ── Choropleth (full polygon fill) ─────────────────────────────
+                props0 = gj["features"][0]["properties"]
+                name_key = next(
+                    (k for k in ["name", "NAME", "KABKOT", "WADMKK", "kabupaten", "kota"]
+                    if k in props0),
+                    list(props0.keys())[0],
+                )
+                geo_names = [f["properties"].get(name_key, "") for f in gj["features"]]
+                kab_m["geo_name"] = kab_m["wilayah"].apply(
+                    lambda w: _fuzzy_match(w, geo_names) or w
+                )
+                hover_lbl = ind_map.replace(" (%)", "").replace(" (Orang)", "").replace("/", " per ")
+                fig_map = px.choropleth(
+                    kab_m.dropna(subset=["nilai", "geo_name"]),
+                    geojson=gj,
+                    locations="geo_name",
+                    featureidkey=f"properties.{name_key}",
+                    color="nilai",
+                    color_continuous_scale=chosen_cs,
+                    hover_name="wilayah",
+                    hover_data={"nilai": f":{fmt}", "geo_name": False},
+                    labels={"nilai": hover_lbl},
+                )
+                fig_map.update_geos(fitbounds="locations", visible=False)
+                fig_map.update_coloraxes(colorbar=dict(
+                    title=dict(text=hover_lbl, font=dict(size=10)),
+                    tickfont=dict(size=9), len=0.75, thickness=14,
+                ))
+                fig_map.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)", geo_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(t=10, r=10, b=10, l=10), height=440,
+                    font=dict(family="Plus Jakarta Sans, sans-serif"),
+                    hoverlabel=dict(bgcolor="#fff", font_size=12, bordercolor="#dde4ee"),
+                )
+                map_mode = "choropleth"
+            else:
+                # ── Bubble map (scatter_geo) — offline-safe ─────────────────────
+                kab_plot = kab_m.dropna(subset=["nilai", "lat", "lon"]).copy()
+
+                # Normalise bubble size (min 6, max 40)
+                v_range = kab_plot["nilai"].max() - kab_plot["nilai"].min()
+                if v_range > 0:
+                    kab_plot["bsize"] = 6 + 34 * (kab_plot["nilai"] - kab_plot["nilai"].min()) / v_range
+                else:
+                    kab_plot["bsize"] = 20
+
+                # Color by quantile
+                q25 = kab_plot["nilai"].quantile(0.25)
+                q75 = kab_plot["nilai"].quantile(0.75)
+                def _bcolor(v):
+                    if v >= q75:   return C["red"]
+                    if v >= kab_plot["nilai"].median(): return C["oranj"]
+                    if v >= q25:   return C["biru2"]
+                    return C["green"]
+                kab_plot["bcolor"] = kab_plot["nilai"].apply(_bcolor)
+                kab_plot["label_txt"] = kab_plot["nilai"].apply(
+                    lambda v: f"{v:{fmt}}{unit if unit in ('%','x') else ''}"
+                )
+
+                fig_map = go.Figure()
+
+                # Background boundary rectangle (very rough Jawa Timur bbox)
+                fig_map.add_trace(go.Scattergeo(
+                    lon=[110.5, 115.0, 115.0, 110.5, 110.5],
+                    lat=[-5.8, -5.8, -9.0, -9.0, -5.8],
+                    mode="lines",
+                    line=dict(color="#dde4ee", width=1),
+                    showlegend=False,
+                    hoverinfo="skip",
+                ))
+
+                # Bubbles
+                fig_map.add_trace(go.Scattergeo(
+                    lon=kab_plot["lon"],
+                    lat=kab_plot["lat"],
+                    mode="markers+text",
+                    marker=dict(
+                        size=kab_plot["bsize"],
+                        color=kab_plot["nilai"],
+                        colorscale=chosen_cs,
+                        cmin=kab_plot["nilai"].min(),
+                        cmax=kab_plot["nilai"].max(),
+                        opacity=0.88,
+                        line=dict(color="#ffffff", width=0.8),
+                        colorbar=dict(
+                            title=dict(text=ind_map, font=dict(size=10)),
+                            tickfont=dict(size=9), len=0.7, thickness=14, x=1.0,
+                        ),
+                        showscale=True,
+                    ),
+                    text=kab_plot["wilayah"].apply(
+                        lambda w: w.replace("Kabupaten ", "Kab. ").replace("Kota ", "Kota ")
+                    ),
+                    textfont=dict(size=7, color="#374151"),
+                    textposition="top center",
+                    customdata=kab_plot[["wilayah", "label_txt"]].values,
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>"
+                        + ind_map + ": %{customdata[1]}<extra></extra>"
+                    ),
+                    showlegend=False,
+                ))
+
+                # Madura highlight line (cosmetic)
+                fig_map.add_trace(go.Scattergeo(
+                    lon=[112.6, 112.7], lat=[-7.1, -7.05],
+                    mode="lines", line=dict(color="#94a3b8", width=0.5, dash="dot"),
+                    showlegend=False, hoverinfo="skip",
+                ))
+
+                fig_map.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    geo=dict(
+                        scope="asia",
+                        resolution=50,
+                        center=dict(lon=112.7, lat=-7.6),
+                        projection_scale=22,
+                        showland=True, landcolor="#f8fafc",
+                        showcoastlines=True, coastlinecolor="#cbd5e1", coastlinewidth=0.7,
+                        showocean=True, oceancolor="#e0f2fe",
+                        showlakes=False,
+                        bgcolor="rgba(0,0,0,0)",
+                    ),
+                    margin=dict(t=0, r=0, b=0, l=0),
+                    height=440,
+                    font=dict(family="Plus Jakarta Sans, sans-serif"),
+                    hoverlabel=dict(bgcolor="#fff", font_size=12, bordercolor="#dde4ee"),
+                )
+                map_mode = "bubble"
+
+            st.plotly_chart(
+                fig_map, use_container_width=True, key="map_tab1",
+                config={"displaylogo": False,
+                        "toImageButtonOptions": {"format": "png", "filename": f"peta_jatim_{yr_map}"}},
+            )
+
+            if map_mode == "bubble":
+                st.markdown(
+                    '<div style="font-size:.72rem;color:#6b7280;padding:0 4px 8px;">'
+                    '🔵 Ukuran & warna lingkaran proporsional terhadap nilai indikator. '
+                    'Untuk peta poligon penuh, pastikan koneksi internet tersedia agar GeoJSON dapat dimuat.</div>',
+                    unsafe_allow_html=True,
+                )
+
+        with col_ana:
+            if len(v_clean) > 0:
+                vmax  = v_clean.max(); vmin  = v_clean.min()
+                vmean = v_clean.mean(); vmed  = v_clean.median()
+                vstd  = v_clean.std()
+                n_hi  = (v_clean > vmed).sum()
+                n_lo  = len(v_clean) - n_hi
+
+                wil_max = kab_m.loc[kab_m["nilai"].idxmax(), "wilayah"]
+                wil_min = kab_m.loc[kab_m["nilai"].idxmin(), "wilayah"]
+
+                def _fmtv(x):
+                    if unit == "%": return f"{x:.2f}%"
+                    if unit == "x": return f"{x:.2f}x"
+                    return f"{x:,.0f}"
+
+                # Interpretasi khusus per indikator
+                interp_hi = "kondisi kritis" if "TPT" in ind_map or "Pencari" in ind_map else "potensi besar"
+                interp_lo = "kondisi terbaik" if "TPT" in ind_map or "Pencari" in ind_map else "perlu perhatian"
+
+                st.markdown(
+                    f"""<div class="analisis-card"><h5>Analisis Spasial</h5>
+                    <ul>
+                    <li><span class="warn">Tertinggi:</span> {wil_max}
+                        <br><b>{_fmtv(vmax)}</b> — {interp_hi}</li>
+                    <li><span class="ok">Terendah:</span> {wil_min}
+                        <br><b>{_fmtv(vmin)}</b> — {interp_lo}</li>
+                    <li>Rata-rata: <span class="hi">{_fmtv(vmean)}</span></li>
+                    <li>Median: <span class="hi">{_fmtv(vmed)}</span></li>
+                    <li>Std. Dev: <span class="hi">{_fmtv(vstd)}</span>
+                        {"— <span class='warn'>dispersi tinggi</span>" if vstd > vmean * 0.3 else "— dispersi rendah"}</li>
+                    <li><span class="warn">{n_hi} wilayah</span> di atas median</li>
+                    <li><span class="ok">{n_lo} wilayah</span> di bawah/sama median</li>
+                    </ul></div>""",
+                    unsafe_allow_html=True,
+                )
+
+                # Top-5 kritis
+                top5 = kab_m[["wilayah", "nilai"]].dropna().nlargest(5, "nilai")
+                bot3 = kab_m[["wilayah", "nilai"]].dropna().nsmallest(3, "nilai")
+
+                st.markdown(
+                    "<div class='analisis-card'><h5>5 Wilayah Kritis (Tertinggi)</h5>"
+                    + "".join([
+                        f"<div style='display:flex;justify-content:space-between;"
+                        f"padding:4px 0;border-bottom:1px solid #e5e7eb;font-size:.77rem;'>"
+                        f"<span>{row['wilayah']}</span>"
+                        f"<span class='warn' style='font-weight:700;font-family:monospace'>{_fmtv(row['nilai'])}</span>"
+                        f"</div>"
+                        for _, row in top5.iterrows()
+                    ])
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    "<div class='analisis-card'><h5>3 Wilayah Terbaik (Terendah)</h5>"
+                    + "".join([
+                        f"<div style='display:flex;justify-content:space-between;"
+                        f"padding:4px 0;border-bottom:1px solid #e5e7eb;font-size:.77rem;'>"
+                        f"<span>{row['wilayah']}</span>"
+                        f"<span class='ok' style='font-weight:700;font-family:monospace'>{_fmtv(row['nilai'])}</span>"
+                        f"</div>"
+                        for _, row in bot3.iterrows()
+                    ])
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.warning("Data tidak tersedia untuk tahun & indikator yang dipilih.")
+
+        st.markdown('</div>', unsafe_allow_html=True)  # penutup chart-card Section F
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2: PASAR & KEBUTUHAN KERJA
 # ══════════════════════════════════════════════════════════════════════════════
@@ -790,7 +1210,7 @@ with tab2:
             <div class="kpi-delta">Tahun {yr2_kpi}</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-label">📋 Lowongan Kerja</div>
+            <div class="kpi-label">Lowongan Kerja</div>
             <div class="kpi-value">{lc2:,}</div>
             <div class="kpi-delta">Tahun {yr2_kpi}</div>
         </div>
@@ -973,6 +1393,311 @@ with tab2:
             <li>Perlu program magang & vokasi untuk percepat kesiapan kerja anak muda.</li>
             </ul></div>""", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
+
+    # ═══ SECTION D: Pemetaan Spasial Pasar Kerja ═════════════════════════
+    st.markdown(
+        '<div class="sec-head">D · Pemetaan Spasial Pasar Kerja Jawa Timur</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.container():
+        st.markdown('<div class="chart-card">', unsafe_allow_html=True)
+
+        # ── Filter row ──────────────────────────────────────────────────────────
+        fd1, fd2, fd3 = st.columns([1, 1, 2])
+        with fd1:
+            yr_map_d = st.selectbox(
+                "Tahun", ["2025", "2024", "2023", "2022", "2021"], key="d_map_yr"
+            )
+        with fd2:
+            ind_map_d = st.selectbox(
+                "Indikator",
+                ["Pencari Kerja (Orang)", "Lowongan Kerja (Orang)", "Rasio Lowongan/Pencari"],
+                key="d_map_ind",
+            )
+        with fd3:
+            cs_opt_d = st.selectbox(
+                "Skema Warna",
+                ["RdYlGn_r — Merah=Kritis", "Blues", "YlOrRd", "Viridis"],
+                key="d_map_cs",
+            )
+
+        st.markdown(
+            f'<div class="chart-card-title" style="padding:0 18px 8px;">'
+            f'Peta Sebaran <b>{ind_map_d}</b> per Kab/Kota — {yr_map_d}</div>',
+            unsafe_allow_html=True,
+        )
+
+        # ── Build nilai per kab/kota ────────────────────────────────────────────
+        kab_d = df_tpt[df_tpt["wilayah"].str.strip() != "Jawa Timur"].copy() if 'TPT' in ind_map_d or 'TPT (%)' == ind_map_d else kab_lk.copy()
+        if 'TPT' in ind_map_d or 'TPT (%)' == ind_map_d:
+            kab_d["wilayah_norm"] = kab_d["wilayah"].apply(_norm)
+            if ind_map_d == "TPT (%)":
+                kab_d["nilai"] = pd.to_numeric(kab_d[yr_map_d], errors="coerce")
+                unit, fmt = "%", ".2f"
+            else:
+                # For Pencari/Lowongan in tab 2 context, still use kab_lk
+                kab_d = kab_lk.copy()
+                kab_d["wilayah_norm"] = kab_d["wilayah"].apply(_norm)
+                field = "pencari" if "Pencari" in ind_map_d else "lowongan"
+                col_lk = f"{field}_{yr_map_d}"
+                kab_d["nilai"] = pd.to_numeric(kab_lk[col_lk], errors="coerce")
+                unit, fmt = "orang", ",.0f"
+        else:
+            kab_d = kab_lk.copy()
+            kab_d["wilayah_norm"] = kab_d["wilayah"].apply(_norm)
+            if ind_map_d in ("Pencari Kerja (Orang)", "Lowongan Kerja (Orang)"):
+                field = "pencari" if "Pencari" in ind_map_d else "lowongan"
+                col_lk = f"{field}_{yr_map_d}"
+                kab_d["nilai"] = pd.to_numeric(kab_lk[col_lk], errors="coerce")
+                unit, fmt = "orang", ",.0f"
+            else:  # Rasio
+                pen = kab_lk[f"pencari_{yr_map_d}"].replace(0, np.nan)
+                kab_d["nilai"] = (kab_lk[f"lowongan_{yr_map_d}"] / pen).round(2)
+                unit, fmt = "x", ".2f"
+
+        kab_d["nilai"] = pd.to_numeric(kab_d["nilai"], errors="coerce")
+        v_clean = kab_d["nilai"].dropna()
+
+        # ── Koordinat ──────────────────────────────────────────────────────────
+        def _coord_d(wil):
+            k = _fuzzy_match(wil, list(_JATIM_CENTROIDS.keys()))
+            return _JATIM_CENTROIDS.get(k, (None, None))
+
+        kab_d["lat"] = kab_d["wilayah"].apply(lambda w: _coord_d(w)[0])
+        kab_d["lon"] = kab_d["wilayah"].apply(lambda w: _coord_d(w)[1])
+
+        # ── Color scale mapping ─────────────────────────────────────────────────
+        _CS_d = {
+            "RdYlGn_r — Merah=Kritis": "RdYlGn_r",
+            "Blues":  "Blues",
+            "YlOrRd": "YlOrRd",
+            "Viridis": "Viridis",
+        }
+        chosen_cs_d = _CS_d.get(cs_opt_d, "RdYlGn_r")
+
+        # ── Attempt choropleth, fallback to bubble map ──────────────────────────
+        gj_d = _load_geojson()
+        col_map_d, col_ana_d = st.columns([3, 1])
+
+        with col_map_d:
+            if gj_d and gj_d.get("features"):
+                # ── Choropleth (full polygon fill) ─────────────────────────────
+                props0_d = gj_d["features"][0]["properties"]
+                name_key_d = next(
+                    (k for k in ["name", "NAME", "KABKOT", "WADMKK", "kabupaten", "kota"]
+                    if k in props0_d),
+                    list(props0_d.keys())[0],
+                )
+                geo_names_d = [f["properties"].get(name_key_d, "") for f in gj_d["features"]]
+                kab_d["geo_name"] = kab_d["wilayah"].apply(
+                    lambda w: _fuzzy_match(w, geo_names_d) or w
+                )
+                hover_lbl_d = ind_map_d.replace(" (%)", "").replace(" (Orang)", "").replace("/", " per ")
+                fig_map_d = px.choropleth(
+                    kab_d.dropna(subset=["nilai", "geo_name"]),
+                    geojson=gj_d,
+                    locations="geo_name",
+                    featureidkey=f"properties.{name_key_d}",
+                    color="nilai",
+                    color_continuous_scale=chosen_cs_d,
+                    hover_name="wilayah",
+                    hover_data={"nilai": f":{fmt}", "geo_name": False},
+                    labels={"nilai": hover_lbl_d},
+                )
+                fig_map_d.update_geos(fitbounds="locations", visible=False)
+                fig_map_d.update_coloraxes(colorbar=dict(
+                    title=dict(text=hover_lbl_d, font=dict(size=10)),
+                    tickfont=dict(size=9), len=0.75, thickness=14,
+                ))
+                fig_map_d.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)", geo_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(t=10, r=10, b=10, l=10), height=440,
+                    font=dict(family="Plus Jakarta Sans, sans-serif"),
+                    hoverlabel=dict(bgcolor="#fff", font_size=12, bordercolor="#dde4ee"),
+                )
+                map_mode_d = "choropleth"
+            else:
+                # ── Bubble map (scatter_geo) — offline-safe ─────────────────────
+                kab_plot_d = kab_d.dropna(subset=["nilai", "lat", "lon"]).copy()
+
+                # Normalise bubble size (min 6, max 40)
+                v_range_d = kab_plot_d["nilai"].max() - kab_plot_d["nilai"].min()
+                if v_range_d > 0:
+                    kab_plot_d["bsize"] = 6 + 34 * (kab_plot_d["nilai"] - kab_plot_d["nilai"].min()) / v_range_d
+                else:
+                    kab_plot_d["bsize"] = 20
+
+                # Color by quantile
+                q25_d = kab_plot_d["nilai"].quantile(0.25)
+                q75_d = kab_plot_d["nilai"].quantile(0.75)
+                def _bcolor_d(v):
+                    if v >= q75_d:   return C["red"]
+                    if v >= kab_plot_d["nilai"].median(): return C["oranj"]
+                    if v >= q25_d:   return C["biru2"]
+                    return C["green"]
+                kab_plot_d["bcolor"] = kab_plot_d["nilai"].apply(_bcolor_d)
+                kab_plot_d["label_txt"] = kab_plot_d["nilai"].apply(
+                    lambda v: f"{v:{fmt}}{unit if unit in ('%','x') else ''}"
+                )
+
+                fig_map_d = go.Figure()
+
+                # Background boundary rectangle (very rough Jawa Timur bbox)
+                fig_map_d.add_trace(go.Scattergeo(
+                    lon=[110.5, 115.0, 115.0, 110.5, 110.5],
+                    lat=[-5.8, -5.8, -9.0, -9.0, -5.8],
+                    mode="lines",
+                    line=dict(color="#dde4ee", width=1),
+                    showlegend=False,
+                    hoverinfo="skip",
+                ))
+
+                # Bubbles
+                fig_map_d.add_trace(go.Scattergeo(
+                    lon=kab_plot_d["lon"],
+                    lat=kab_plot_d["lat"],
+                    mode="markers+text",
+                    marker=dict(
+                        size=kab_plot_d["bsize"],
+                        color=kab_plot_d["nilai"],
+                        colorscale=chosen_cs_d,
+                        cmin=kab_plot_d["nilai"].min(),
+                        cmax=kab_plot_d["nilai"].max(),
+                        opacity=0.88,
+                        line=dict(color="#ffffff", width=0.8),
+                        colorbar=dict(
+                            title=dict(text=ind_map_d, font=dict(size=10)),
+                            tickfont=dict(size=9), len=0.7, thickness=14, x=1.0,
+                        ),
+                        showscale=True,
+                    ),
+                    text=kab_plot_d["wilayah"].apply(
+                        lambda w: w.replace("Kabupaten ", "Kab. ").replace("Kota ", "Kota ")
+                    ),
+                    textfont=dict(size=7, color="#374151"),
+                    textposition="top center",
+                    customdata=kab_plot_d[["wilayah", "label_txt"]].values,
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>"
+                        + ind_map_d + ": %{customdata[1]}<extra></extra>"
+                    ),
+                    showlegend=False,
+                ))
+
+                # Madura highlight line (cosmetic)
+                fig_map_d.add_trace(go.Scattergeo(
+                    lon=[112.6, 112.7], lat=[-7.1, -7.05],
+                    mode="lines", line=dict(color="#94a3b8", width=0.5, dash="dot"),
+                    showlegend=False, hoverinfo="skip",
+                ))
+
+                fig_map_d.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    geo=dict(
+                        scope="asia",
+                        resolution=50,
+                        center=dict(lon=112.7, lat=-7.6),
+                        projection_scale=22,
+                        showland=True, landcolor="#f8fafc",
+                        showcoastlines=True, coastlinecolor="#cbd5e1", coastlinewidth=0.7,
+                        showocean=True, oceancolor="#e0f2fe",
+                        showlakes=False,
+                        bgcolor="rgba(0,0,0,0)",
+                    ),
+                    margin=dict(t=0, r=0, b=0, l=0),
+                    height=440,
+                    font=dict(family="Plus Jakarta Sans, sans-serif"),
+                    hoverlabel=dict(bgcolor="#fff", font_size=12, bordercolor="#dde4ee"),
+                )
+                map_mode_d = "bubble"
+
+            st.plotly_chart(
+                fig_map_d, use_container_width=True, key="map_tab2",
+                config={"displaylogo": False,
+                        "toImageButtonOptions": {"format": "png", "filename": f"peta_jatim_{yr_map_d}"}},
+            )
+
+            if map_mode_d == "bubble":
+                st.markdown(
+                    '<div style="font-size:.72rem;color:#6b7280;padding:0 4px 8px;">'
+                    '🔵 Ukuran & warna lingkaran proporsional terhadap nilai indikator. '
+                    'Untuk peta poligon penuh, pastikan koneksi internet tersedia agar GeoJSON dapat dimuat.</div>',
+                    unsafe_allow_html=True,
+                )
+
+        with col_ana_d:
+            if len(v_clean) > 0:
+                vmax_d  = v_clean.max(); vmin_d  = v_clean.min()
+                vmean_d = v_clean.mean(); vmed_d  = v_clean.median()
+                vstd_d  = v_clean.std()
+                n_hi_d  = (v_clean > vmed_d).sum()
+                n_lo_d  = len(v_clean) - n_hi_d
+
+                wil_max_d = kab_d.loc[kab_d["nilai"].idxmax(), "wilayah"]
+                wil_min_d = kab_d.loc[kab_d["nilai"].idxmin(), "wilayah"]
+
+                def _fmtv_d(x):
+                    if unit == "%": return f"{x:.2f}%"
+                    if unit == "x": return f"{x:.2f}x"
+                    return f"{x:,.0f}"
+
+                # Interpretasi khusus per indikator
+                interp_hi_d = "kondisi kritis" if "TPT" in ind_map_d or "Pencari" in ind_map_d else "potensi besar"
+                interp_lo_d = "kondisi terbaik" if "TPT" in ind_map_d or "Pencari" in ind_map_d else "perlu perhatian"
+
+                st.markdown(
+                    f"""<div class="analisis-card"><h5>Analisis Spasial</h5>
+                    <ul>
+                    <li><span class="warn">Tertinggi:</span> {wil_max_d}
+                        <br><b>{_fmtv_d(vmax_d)}</b> — {interp_hi_d}</li>
+                    <li><span class="ok">Terendah:</span> {wil_min_d}
+                        <br><b>{_fmtv_d(vmin_d)}</b> — {interp_lo_d}</li>
+                    <li>Rata-rata: <span class="hi">{_fmtv_d(vmean_d)}</span></li>
+                    <li>Median: <span class="hi">{_fmtv_d(vmed_d)}</span></li>
+                    <li>Std. Dev: <span class="hi">{_fmtv_d(vstd_d)}</span>
+                        {"— <span class='warn'>dispersi tinggi</span>" if vstd_d > vmean_d * 0.3 else "— dispersi rendah"}</li>
+                    <li><span class="warn">{n_hi_d} wilayah</span> di atas median</li>
+                    <li><span class="ok">{n_lo_d} wilayah</span> di bawah/sama median</li>
+                    </ul></div>""",
+                    unsafe_allow_html=True,
+                )
+
+                # Top-5 kritis
+                top5_d = kab_d[["wilayah", "nilai"]].dropna().nlargest(5, "nilai")
+                bot3_d = kab_d[["wilayah", "nilai"]].dropna().nsmallest(3, "nilai")
+
+                st.markdown(
+                    "<div class='analisis-card'><h5>5 Wilayah Kritis (Tertinggi)</h5>"
+                    + "".join([
+                        f"<div style='display:flex;justify-content:space-between;"
+                        f"padding:4px 0;border-bottom:1px solid #e5e7eb;font-size:.77rem;'>"
+                        f"<span>{row['wilayah']}</span>"
+                        f"<span class='warn' style='font-weight:700;font-family:monospace'>{_fmtv_d(row['nilai'])}</span>"
+                        f"</div>"
+                        for _, row in top5_d.iterrows()
+                    ])
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    "<div class='analisis-card'><h5>3 Wilayah Terbaik (Terendah)</h5>"
+                    + "".join([
+                        f"<div style='display:flex;justify-content:space-between;"
+                        f"padding:4px 0;border-bottom:1px solid #e5e7eb;font-size:.77rem;'>"
+                        f"<span>{row['wilayah']}</span>"
+                        f"<span class='ok' style='font-weight:700;font-family:monospace'>{_fmtv_d(row['nilai'])}</span>"
+                        f"</div>"
+                        for _, row in bot3_d.iterrows()
+                    ])
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.warning("Data tidak tersedia untuk tahun & indikator yang dipilih.")
+
+        st.markdown('</div>', unsafe_allow_html=True)  # penutup chart-card Section D
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3: ANALISIS MENDALAM
