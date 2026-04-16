@@ -1,8 +1,13 @@
-# 🎈 Blank app template
+# VISUALISASI DASHBOARD “JATIMWORK: JAWA TIMUR  WORKFORCE INSIGHT” UNTUK ANALISIS KETENAGAKERJAAN PROVINSI JAWA TIMUR 
 
-A simple Streamlit app template for you to modify!
+MATA KULIAH OFFICIAL STATISTICS SD-A1
+PROGRAM STUDI TEKNOLOGI SAINS DATA
+FAKULTAS TEKNOLOGI MAJU DAN MULTIDISIPLIN
+UNIVERSITAS AIRLANGGA
+2026
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
+[![Open in Streamlit]
+(https://dashboard-ketenagakerjaan-jatim-offstat5.streamlit.app/))
 
 ### How to run it on your own machine
 
