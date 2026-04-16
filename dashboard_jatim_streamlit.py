@@ -22,7 +22,7 @@ def p(fname): return os.path.join(BASE, fname)
 # ─── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Dashboard Ketenagakerjaan Jawa Timur",
-    page_icon="", layout="wide",
+    page_icon=p("Logo.png"), layout="wide",
     initial_sidebar_state="collapsed"
 )
 
@@ -51,13 +51,20 @@ html, body, .main, [data-testid="stAppViewContainer"],
     align-items: center;
     gap: 18px;
     box-shadow: 0 4px 20px rgba(0,61,122,.25);
+    position: relative;
 }
 .dash-header-logo {
     width: 52px; height: 52px;
-    background: #f47920;
     border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 24px; flex-shrink: 0;
+    flex-shrink: 0;
+    background: transparent;
+    overflow: hidden;
+}
+.dash-header-logo img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    border-radius: 8px;
 }
 .dash-header-title { color: #fff; font-size: 1.35rem; font-weight: 800; margin: 0; }
 .dash-header-sub { color: rgba(255,255,255,.75); font-size: .8rem; margin-top: 3px; }
@@ -198,7 +205,7 @@ html, body, .main, [data-testid="stAppViewContainer"],
 
 /* SECTION HEADING */
 .sec-head {
-    font-size: .8rem;
+    font-size: 1rem;
     font-weight: 800;
     color: #003d7a;
     padding: 10px 16px;
@@ -298,14 +305,16 @@ def dl_buttons(fig, key):
 # ─── DATA LOADERS (same as v3) ────────────────────────────────────────────────
 @st.cache_data
 def load_tpt():
-    raw = pd.read_excel(p("TPT_2021-2025.xlsx"), header=1)
+    raw = pd.read_excel(p("TPT_2001-2025.xlsx"), header=1)
     raw = raw.rename(columns={raw.columns[0]: "wilayah"})
     raw = raw.dropna(subset=["wilayah"])
-    yc = [c for c in raw.columns if str(c).strip() in ["2021","2022","2023","2024","2025"]]
-    out = raw[["wilayah"] + yc].copy()
-    out.columns = ["wilayah","2021","2022","2023","2024","2025"]
+    # Ambil semua kolom tahun 2001-2025
+    year_cols = [c for c in raw.columns if str(c).strip().isdigit()
+                 and 2001 <= int(str(c).strip()) <= 2025]
+    out = raw[["wilayah"] + year_cols].copy()
+    out.columns = ["wilayah"] + [str(int(str(c).strip())) for c in year_cols]
     out = out[out["wilayah"] != "wilayah"]
-    for c in ["2021","2022","2023","2024","2025"]:
+    for c in out.columns[1:]:
         out[c] = pd.to_numeric(out[c], errors="coerce")
     return out.reset_index(drop=True)
 
@@ -428,14 +437,23 @@ PEN_Y  = [int(prov_lk.get(f"pencari_{y}",0)) for y in YEARS]
 LOW_Y  = [int(prov_lk.get(f"lowongan_{y}",0)) for y in YEARS]
 
 # ─── HEADER ───────────────────────────────────────────────────────────────────
-st.markdown("""
+# Read and encode logo as base64
+import base64
+try:
+    with open(p("Logo.png"), "rb") as img:
+        logo_base64 = base64.b64encode(img.read()).decode()
+        logo_html = f'<img src="data:image/png;base64,{logo_base64}" alt="Logo" style="width:100%; height:100%; object-fit:contain;"/>'  
+except:
+    logo_html = ''
+
+st.markdown(f"""
 <div class="dash-header">
-    <div class="dash-header-logo"></div>
+    <div class="dash-header-logo">{logo_html}</div>
     <div>
         <div class="dash-header-title">Dashboard Ketenagakerjaan Jawa Timur</div>
         <div class="dash-header-sub">Analisis Pasar Kerja Berbasis Data BPS · Sakernas 2021–2025</div>
     </div>
-    <div class="dash-header-badge">Sumber: BPS Jawa Timur</div>
+    <div class="dash-header-badge">Sumber: BPS Jawa Timur dan Sakernas 2021–2025</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -443,7 +461,7 @@ st.markdown("""
 tab1, tab2, tab3 = st.tabs([
     "Struktur Ketenagakerjaan",
     "Pasar & Kebutuhan Kerja",
-    "Analisis Mendalam",
+    "Analisis Lanjutan",
 ])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -487,8 +505,8 @@ with tab1:
         </div>
         <div class="kpi-card">
             <div class="kpi-label">Upah Informal</div>
-            <div class="kpi-value">Rp{up_c/1e6:.2f}jt</div>
-            <div class="kpi-delta">Rata-rata {yr_kpi}</div>
+            <div class="kpi-value">{f'Rp{up_c/1e6:.2f}jt' if up_c else 'N/A'}</div>
+            <div class="kpi-delta">{f'Rata-rata {yr_kpi}' if up_c else 'Data tahun 2024 tidak tersedia'}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -496,7 +514,7 @@ with tab1:
     st.markdown("---")
 
     # ═══ GRAFIK A: Tren Angkatan Kerja ════════════════════════════════════
-    st.markdown('<div class="sec-head">A · Tren Angkatan Kerja</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-head">A · Tren Tingkat Partisipasi Angkatan Kerja (TPAK)</div>', unsafe_allow_html=True)
     with st.container():
         st.markdown('<div class="chart-card">', unsafe_allow_html=True)
         # Filter
@@ -541,7 +559,7 @@ with tab1:
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ═══ GRAFIK B: Tren TPT & TPAK ════════════════════════════════════════
-    st.markdown('<div class="sec-head">B · Tren TPT dan TPAK</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-head">B · Tren Tingkat Pengangguran Terbuka (TPT) dan Tingkat Partisipasi Angkatan Kerja (TPAK)</div>', unsafe_allow_html=True)
     with st.container():
         st.markdown('<div class="chart-card">', unsafe_allow_html=True)
         fb1, fb2 = st.columns([2,4])
@@ -639,7 +657,7 @@ with tab1:
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ═══ GRAFIK D: Jam Kerja ══════════════════════════════════════════════
-    st.markdown('<div class="sec-head">D · Komposisi Jam Kerja</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-head">D · Komposisi Jam Kerja Penduduk Bekerja</div>', unsafe_allow_html=True)
     with st.container():
         st.markdown('<div class="chart-card">', unsafe_allow_html=True)
         fd1, _ = st.columns([2,4])
@@ -784,7 +802,7 @@ with tab2:
         <div class="kpi-card">
             <div class="kpi-label">Rasio Lowongan/Pencari</div>
             <div class="kpi-value">{rpc2:.2f}x</div>
-            <div class="kpi-delta {r_class}">{'Memadai ✓' if rpc2>=1 else 'Di bawah 1 — waspada !'}</div>
+            <div class="kpi-delta {r_class}">{'Memadai ✓' if rpc2>=1 else 'Di bawah 1 — Perlu Diperhatikan'}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1116,76 +1134,154 @@ with tab3:
             </ul></div>""", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ═══ GRAFIK C: Forecasting ════════════════════════════════════════════
+    # ═══ GRAFIK C: Forecasting ARIMA ══════════════════════════════════════════
     st.markdown('<div class="sec-head">C · Forecasting TPT Jawa Timur</div>', unsafe_allow_html=True)
     with st.container():
         st.markdown('<div class="chart-card">', unsafe_allow_html=True)
-        ff1, ff2, ff3 = st.columns([2,2,2])
-        with ff1: metode = st.selectbox("Metode", ["Linear Regression","Polynomial (Derajat 2)"], key="t3fc")
-        with ff2: tahun_pred = st.multiselect("Tahun Prediksi", [2026,2027,2028], default=[2026,2027])
-        st.markdown('<div class="chart-card-title" style="padding:0 18px 6px;">Proyeksi TPT Jawa Timur</div>', unsafe_allow_html=True)
+        ff1, ff2 = st.columns([2, 2])
+        with ff1:
+            arima_order = st.selectbox(
+                "Order ARIMA (p,d,q)",
+                ["Auto (AIC terbaik)", "(1,1,1)", "(2,1,1)", "(1,1,2)", "(2,1,2)", "(0,1,1)"],
+                key="t3fc"
+            )
+        with ff2:
+            tahun_pred_end = st.selectbox("Prediksi hingga tahun", [2026, 2027, 2028, 2029, 2030], index=4, key="t3fc_end")
 
-        hx = np.array(YEARS).reshape(-1,1); hy = np.array(TPT_Y)
-        if metode == "Polynomial (Derajat 2)":
-            coef = np.polyfit(YEARS, TPT_Y, 2)
-            pf = np.poly1d(coef)
-            pred_v = [float(pf(y)) for y in tahun_pred]
-            r2 = 1 - np.sum((hy - pf(np.array(YEARS)))**2)/np.sum((hy-hy.mean())**2)
+        st.markdown('<div class="chart-card-title" style="padding:0 18px 6px;">Proyeksi TPT Jawa Timur — ARIMA</div>', unsafe_allow_html=True)
+
+        # Ambil data Jawa Timur dari semua tahun 2001-2025
+        df_tpt = load_tpt()
+        jatim_row = df_tpt[df_tpt["wilayah"].str.contains("Jawa Timur", case=False, na=False)]
+        all_years = sorted([int(c) for c in df_tpt.columns if c != "wilayah"])
+        if not jatim_row.empty:
+            tpt_series = [float(jatim_row[str(y)].values[0]) for y in all_years]
         else:
-            reg_f = LinearRegression().fit(hx, hy)
-            pred_v = [float(reg_f.predict([[y]])[0]) for y in tahun_pred]
-            r2 = reg_f.score(hx, hy)
-            pf = lambda x: float(reg_f.predict([[x]])[0])
+            # fallback ke konstanta YEARS/TPT_Y jika ada
+            all_years = YEARS
+            tpt_series = TPT_Y
 
-        fig_fc = go.Figure()
-        fig_fc.add_trace(go.Scatter(
-            x=YEARS, y=TPT_Y, mode="lines+markers+text", name="Data Historis",
-            line=dict(color=C["biru"],width=3),
-            marker=dict(size=10,color=C["biru"],line=dict(color="#fff",width=2)),
-            text=[f"{v:.2f}%" for v in TPT_Y], textposition="top center",
-            textfont=dict(size=10,color=C["biru"],family="monospace"),
-        ))
-        if tahun_pred:
-            conn_x = [YEARS[-1]] + tahun_pred
-            conn_y = [TPT_Y[-1]] + pred_v
+        # Filter NaN
+        valid = [(y, v) for y, v in zip(all_years, tpt_series) if not np.isnan(v)]
+        hist_years = [x[0] for x in valid]
+        hist_vals  = [x[1] for x in valid]
+
+        # Fit ARIMA
+        from statsmodels.tsa.arima.model import ARIMA
+        from statsmodels.tsa.stattools import adfuller
+        import warnings, itertools
+
+        ts = pd.Series(hist_vals, index=pd.date_range(start=str(hist_years[0]), periods=len(hist_years), freq="YE"))
+
+        @st.cache_data
+        def fit_arima(vals, order_str, end_year):
+            s = pd.Series(vals, index=pd.date_range(start=str(hist_years[0]), periods=len(vals), freq="YE"))
+            n_steps = end_year - hist_years[-1]
+
+            if order_str == "Auto (AIC terbaik)":
+                best_aic, best_order, best_model = np.inf, (1,1,1), None
+                for p, d, q in itertools.product(range(3), range(2), range(3)):
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            m = ARIMA(s, order=(p,d,q)).fit()
+                            if m.aic < best_aic:
+                                best_aic, best_order, best_model = m.aic, (p,d,q), m
+                    except Exception:
+                        continue
+                model = best_model
+                used_order = best_order
+            else:
+                p, d, q = map(int, order_str.strip("()").split(","))
+                used_order = (p, d, q)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    model = ARIMA(s, order=(p,d,q)).fit()
+
+            forecast = model.get_forecast(steps=n_steps)
+            pred_mean = forecast.predicted_mean
+            ci = forecast.conf_int(alpha=0.20)   # 80% CI
+            pred_years = list(range(hist_years[-1]+1, end_year+1))
+            return (
+                float(model.aic),
+                used_order,
+                pred_years,
+                pred_mean.values.tolist(),
+                ci.iloc[:, 0].values.tolist(),
+                ci.iloc[:, 1].values.tolist(),
+            )
+
+        try:
+            aic_val, used_order, pred_years, pred_vals, ci_lo, ci_hi = fit_arima(
+                tuple(hist_vals), arima_order, tahun_pred_end
+            )
+            arima_ok = True
+        except Exception as e:
+            arima_ok = False
+            st.warning(f"ARIMA gagal difit: {e}. Coba order lain.")
+
+        if arima_ok:
+            fig_fc = go.Figure()
+
+            # Data historis
             fig_fc.add_trace(go.Scatter(
-                x=conn_x, y=conn_y, mode="lines+markers+text",
-                name=f"Prediksi ({metode})",
-                line=dict(color=C["oranj"],width=3,dash="dash"),
-                marker=dict(size=10,symbol="diamond",color=C["oranj"],line=dict(color="#fff",width=2)),
-                text=[""]+[f"~{v:.2f}%" for v in pred_v], textposition="top center",
-                textfont=dict(size=10,color=C["oranj"],family="monospace"),
+                x=hist_years, y=hist_vals,
+                mode="lines+markers", name="Data Historis (2001–2025)",
+                line=dict(color=C["biru"], width=2.5),
+                marker=dict(size=6, color=C["biru"], line=dict(color="#fff", width=1.5)),
             ))
-            res = hy - np.array([pf(y) for y in YEARS]); se = np.std(res)
-            if len(tahun_pred) >= 2:
-                fig_fc.add_trace(go.Scatter(
-                    x=tahun_pred+tahun_pred[::-1],
-                    y=[v+se*1.5 for v in pred_v]+[v-se*1.5 for v in pred_v[::-1]],
-                    fill="toself", fillcolor="rgba(244,121,32,.12)",
-                    line=dict(color="rgba(0,0,0,0)"), showlegend=False, name="Interval",
-                ))
-        fig_fc.update_layout(**bps_layout({
-            "xaxis":dict(gridcolor="#f0f4f8",zerolinecolor="#e4e9f0",dtick=1,
-                range=[2020.5, max(tahun_pred+[2025])+1]),
-            "yaxis":dict(gridcolor="#f0f4f8",zerolinecolor="#e4e9f0",range=[1,8],title="TPT (%)"),
-            "shapes":[dict(type="line",x0=2025.5,x1=2025.5,y0=1,y1=8,
-                line=dict(color="#cbd5e1",width=1.5,dash="dot"))],
-            "annotations":[dict(x=2025.5,y=7.6,text="Historis | Prediksi",
-                showarrow=False,font=dict(size=9,color="#94a3b8"),xanchor="center")],
-            "height":360,
-        }))
 
-        col_g, col_n = st.columns([3,1])
-        with col_g:
-            st.plotly_chart(fig_fc, use_container_width=True, config={"displaylogo":False,"toImageButtonOptions":{"format":"png","filename":"forecasting_tpt"}})
-        with col_n:
-            pred_str = " · ".join([f"{y}: ~{v:.2f}%" for y,v in zip(tahun_pred,pred_v)]) if tahun_pred else "—"
-            st.markdown(f"""<div class="analisis-card"><h5>Analisis</h5>
-            <ul>
-            <li><span class="hi">R² = {r2:.4f}</span> — model sangat cocok dengan data historis.</li>
-            <li>Proyeksi: <span class="hi">{pred_str}</span>.</li>
-            <li>Lonjakan pencari kerja 2025 bisa <span class="warn">memperlambat penurunan</span> TPT aktual.</li>
-            <li>Prediksi bersifat business-as-usual — tidak memperhitungkan guncangan ekonomi mendadak.</li>
-            <li>Area bayangan = rentang ketidakpastian prediksi.</li>
-            </ul></div>""", unsafe_allow_html=True)
+            # Confidence interval (area)
+            fig_fc.add_trace(go.Scatter(
+                x=pred_years + pred_years[::-1],
+                y=ci_hi + ci_lo[::-1],
+                fill="toself", fillcolor="rgba(244,121,32,.15)",
+                line=dict(color="rgba(0,0,0,0)"),
+                showlegend=True, name="Interval Kepercayaan 80%",
+            ))
+
+            # Connector dari titik terakhir historis ke prediksi pertama
+            fig_fc.add_trace(go.Scatter(
+                x=[hist_years[-1]] + pred_years,
+                y=[hist_vals[-1]] + pred_vals,
+                mode="lines+markers+text", name=f"Prediksi ARIMA{used_order}",
+                line=dict(color=C["oranj"], width=3, dash="dash"),
+                marker=dict(size=9, symbol="diamond", color=C["oranj"], line=dict(color="#fff", width=2)),
+                text=[""] + [f"~{v:.2f}%" for v in pred_vals],
+                textposition="top center",
+                textfont=dict(size=10, color=C["oranj"], family="monospace"),
+            ))
+
+            fig_fc.update_layout(**bps_layout({
+                "xaxis": dict(gridcolor="#f0f4f8", zerolinecolor="#e4e9f0", dtick=2,
+                            range=[2000.5, tahun_pred_end + 0.8]),
+                "yaxis": dict(gridcolor="#f0f4f8", zerolinecolor="#e4e9f0", title="TPT (%)"),
+                "shapes": [dict(type="line", x0=2025.5, x1=2025.5,
+                                y0=0, y1=12,
+                                line=dict(color="#cbd5e1", width=1.5, dash="dot"))],
+                "annotations": [dict(x=2025.5, y=0.5,
+                                    text="Historis | Prediksi",
+                                    showarrow=False,
+                                    font=dict(size=9, color="#94a3b8"),
+                                    xanchor="center")],
+                "height": 380,
+            }))
+
+            col_g, col_n = st.columns([3, 1])
+            with col_g:
+                st.plotly_chart(fig_fc, use_container_width=True,
+                                config={"displaylogo": False,
+                                        "toImageButtonOptions": {"format": "png", "filename": "forecasting_tpt_arima"}})
+            with col_n:
+                pred_str = " · ".join([f"{y}: ~{v:.2f}%" for y, v in zip(pred_years, pred_vals)])
+                st.markdown(f"""<div class="analisis-card"><h5>Analisis</h5>
+                <ul>
+                <li>Model: <span class="hi">ARIMA{used_order}</span></li>
+                <li>AIC = <span class="hi">{aic_val:.2f}</span> — semakin kecil semakin baik.</li>
+                <li>Proyeksi: <span class="hi">{pred_str}</span>.</li>
+                <li>Area bayangan = interval kepercayaan <span class="hi">80%</span>.</li>
+                <li>Model belajar dari data <span class="hi">2001–2025</span> (25 titik).</li>
+                <li>Prediksi tidak memperhitungkan <span class="warn">guncangan struktural</span> mendadak.</li>
+                </ul></div>""", unsafe_allow_html=True)
+
         st.markdown('</div>', unsafe_allow_html=True)
