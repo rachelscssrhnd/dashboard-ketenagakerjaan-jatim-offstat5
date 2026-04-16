@@ -17,8 +17,8 @@ UNIVERSITAS AIRLANGGA
 * Melda Jesica Telsye Salaka (164231108)
 
 
+### Open in Streamlit
 
-[![Open in Streamlit]
 (https://dashboard-ketenagakerjaan-jatim-offstat5.streamlit.app/))
 
 ### How to run it on your own machine
