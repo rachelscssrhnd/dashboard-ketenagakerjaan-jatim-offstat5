@@ -453,7 +453,6 @@ PEN_Y  = [int(prov_lk.get(f"pencari_{y}",0)) for y in YEARS]
 LOW_Y  = [int(prov_lk.get(f"lowongan_{y}",0)) for y in YEARS]
 
 # ─── HEADER ───────────────────────────────────────────────────────────────────
-# Read and encode logo as base64
 import base64
 try:
     with open(p("Logo.png"), "rb") as img:
@@ -520,7 +519,7 @@ with tab1:
             <div class="kpi-delta {delta_class(d_tpak)}">{delta_sym(d_tpak)}pp vs {prev_yr}</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-label">Upah Informal</div>
+            <div class="kpi-label">Upah Pekerja Informal</div>
             <div class="kpi-value">{f'Rp{up_c/1e6:.2f}jt' if up_c else 'N/A'}</div>
             <div class="kpi-delta">{f'Rata-rata {yr_kpi}' if up_c else 'Data tahun 2024 tidak tersedia'}</div>
         </div>
@@ -720,7 +719,7 @@ with tab1:
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ═══ GRAFIK E: Upah Informal + Status ═════════════════════════════════
-    st.markdown('<div class="sec-head">E · Upah Informal & Status Pekerjaan</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-head">E · Upah Pekerja Informal & Status Pekerjaan</div>', unsafe_allow_html=True)
     col_e1, col_e2 = st.columns(2)
 
     with col_e1:
@@ -750,8 +749,9 @@ with tab1:
         u_first = uv[0]; u_last = uv[-1]
         st.markdown(f"""<div class="analisis-card" style="margin-top:8px"><h5>Analisis</h5>
         <ul>
-        <li>Upah informal naik <span class="hi">{(u_last-u_first)/u_first*100:.1f}%</span> dalam periode 2021–{max(uyr)}.</li>
-        <li>Namun tetap jauh di bawah upah formal — <span class="warn">sektor informal masih rentan</span>.</li>
+        <li>Upah pekerja informal digunakan untuk menggambarkan kondisi riil kesejahteraan pekerja, terutama kelompok rentan, yang cenderung memiliki pendapatan tidak tetap dan lebih fluktuatif.</li>
+        <li>Upah pekerja informal naik <span class="hi">{(u_last-u_first)/u_first*100:.1f}%</span> dalam periode 2021–{max(uyr)}.</li>
+        <li>Namun tetap jauh di bawah upah pekerja formal — <span class="warn">sektor pekerja informal masih rentan</span>.</li>
         </ul></div>""", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1389,7 +1389,7 @@ with tab2:
             <ul>
             <li>Usia <span class="hi">25–49 tahun</span> — usia produktif inti — memiliki proporsi pekerja penuh tertinggi.</li>
             <li>Usia <span class="warn">15–19 tahun</span> terendah: masih sekolah atau baru masuk pasar kerja.</li>
-            <li>Usia <span class="warn">60+ tahun</span> rendah karena cenderung paruh waktu / sektor informal.</li>
+            <li>Usia <span class="warn">60+ tahun</span> rendah karena cenderung paruh waktu / sektor pekerja informal.</li>
             <li>Perlu program magang & vokasi untuk percepat kesiapan kerja anak muda.</li>
             </ul></div>""", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
@@ -1852,6 +1852,7 @@ with tab3:
             dir_kata = "negatif kuat" if rv < -0.5 else "negatif sedang" if rv < 0 else "positif"
             st.markdown(f"""<div class="analisis-card"><h5>Analisis</h5>
             <ul>
+            <li>Upah formal digunakan dalam analisis korelasi karena mencerminkan struktur ekonomi yang lebih stabil dan terstandarisasi antar wilayah.</li>                     
             <li>Korelasi Upah vs TPT = <span class="hi">r = {rv:.2f}</span> ({dir_kata}).</li>
             <li>Daerah dengan upah formal lebih tinggi cenderung memiliki <span class="ok">TPT lebih rendah</span>.</li>
             <li>Artinya: menaikkan UMK tidak otomatis menambah pengangguran — justru mencerminkan ekonomi daerah yang lebih produktif.</li>
