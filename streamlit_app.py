@@ -529,7 +529,7 @@ with tab1:
     st.markdown("---")
 
     # ═══ GRAFIK A: Tren Angkatan Kerja ════════════════════════════════════
-    st.markdown('<div class="sec-head">A · Tren Tingkat Partisipasi Angkatan Kerja (TPAK)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-head">A · Tren Jumlah Angkatan Kerja</div>', unsafe_allow_html=True)
     with st.container():
         st.markdown('<div class="chart-card">', unsafe_allow_html=True)
         # Filter
